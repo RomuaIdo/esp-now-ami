@@ -31,7 +31,9 @@ const elWaveformHint = document.getElementById('waveform-hint');
 function xorEncrypt(str) {
     const bytes = [];
     for (let i = 0; i < str.length; i++) {
-        bytes.push(str.charCodeAt(i) ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
+        // & 0xFF clamps Latin-1 chars (≤ 0xFF) correctly; out-of-range become '?'
+        const b = str.charCodeAt(i) <= 0xFF ? str.charCodeAt(i) : 0x3F;
+        bytes.push(b ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
     }
     return bytes;
 }
@@ -67,7 +69,9 @@ function bitString(bytes) {
 
 function encryptedToString(bytes) {
     return bytes
-        .map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, '0')}`)
+        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
+            ? String.fromCharCode(b)
+            : `[${b.toString(16).padStart(2, '0').toUpperCase()}]`)
         .join('');
 }
 

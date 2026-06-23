@@ -28,14 +28,16 @@ function bitsToBytes(bits) {
 
 function bytesToString(bytes) {
     return bytes
-        .map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '?')
+        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0 ? String.fromCharCode(b) : '?')
         .join('');
 }
 
-// Encrypted bytes as printable string; non-printable → \xNN
+// Encrypted bytes: printable chars shown as-is, others as [NN] (2-digit hex in brackets)
 function encryptedToString(bytes) {
     return bytes
-        .map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, '0')}`)
+        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
+            ? String.fromCharCode(b)
+            : `[${b.toString(16).padStart(2, '0').toUpperCase()}]`)
         .join('');
 }
 

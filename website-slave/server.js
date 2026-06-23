@@ -90,7 +90,12 @@ io.on('connection', socket => {
     socket.on('set-message', msg => {
         if (!activePort || !activePort.isOpen) return;
         const safe = String(msg).replace(/[\r\n]/g, '').slice(0, 20);
-        activePort.write(safe + '\n', err => {
+        // Encode as Latin-1: each char becomes 1 byte (0x00–0xFF).
+        // Chars outside Latin-1 (> U+00FF) become '?' so byte count == char count.
+        const latin1 = Buffer.from(
+            [...safe].map(c => c.charCodeAt(0) <= 0xFF ? c.charCodeAt(0) : 0x3F)
+        );
+        activePort.write(Buffer.concat([latin1, Buffer.from([0x0A])]), err => {
             if (err) console.error('[Serial] Write error:', err.message);
         });
         console.log(`[Slave ${SLAVE_ID}] Set message: "${safe}"`);
