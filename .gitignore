@@ -1,0 +1,13 @@
+# PlatformIO
+.pio/
+.cache/
+compile_commands.json
+
+# Node.js
+node_modules/
+npm-debug.log*
+.env
+
+# OS
+.DS_Store
+Thumbs.db

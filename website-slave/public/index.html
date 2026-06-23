@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP-NOW · Slave Controller</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>ESP-NOW &mdash; Controlador Slave <span id="slave-label" class="slave-badge">?</span></h1>
+        <div class="status-bar">
+            <span id="ws-status"     class="badge badge-off">WebSocket</span>
+            <span id="serial-status" class="badge badge-off">Serial</span>
+        </div>
+    </header>
+
+    <main>
+        <section class="control-card">
+
+            <!-- Input e botões -->
+            <div class="card-section">
+                <label class="field-label">Mensagem a enviar <span class="hint">(máx. 20 caracteres)</span></label>
+                <div class="input-row">
+                    <input
+                        type="text"
+                        id="msg-input"
+                        class="msg-input"
+                        maxlength="20"
+                        placeholder="Digite a mensagem…"
+                        autocomplete="off"
+                    >
+                    <span id="char-count" class="char-count">0 / 20</span>
+                </div>
+                <div class="btn-row">
+                    <button id="btn-set"  class="btn btn-set">Definir mensagem</button>
+                    <button id="btn-send" class="btn btn-send">Enviar agora</button>
+                </div>
+                <p class="tip">
+                    <kbd>Enter</kbd> define a mensagem &nbsp;·&nbsp;
+                    <kbd>Ctrl+Enter</kbd> define e envia imediatamente.
+                </p>
+            </div>
+
+            <!-- Gráfico AMI -->
+            <div class="card-section chart-section">
+                <label class="field-label">Forma de onda AMI <span class="hint" id="waveform-hint">(prévia — atualiza ao digitar)</span></label>
+                <div class="chart-wrapper">
+                    <canvas id="waveform-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Info: bits / hex / cifrado -->
+            <div class="info-grid">
+                <div class="info-block">
+                    <label>Bits (MSB primeiro)</label>
+                    <pre id="bits-out" class="mono dim">—</pre>
+                </div>
+                <div class="info-block">
+                    <label>Bytes cifrados (hex)</label>
+                    <pre id="hex-out" class="mono">—</pre>
+                </div>
+                <div class="info-block wide">
+                    <label>Mensagem cifrada (XOR)</label>
+                    <pre id="enc-out" class="mono encrypted">—</pre>
+                </div>
+            </div>
+
+            <!-- Log serial -->
+            <div class="card-section log-section">
+                <div class="log-header">
+                    <label class="field-label">Saída Serial</label>
+                    <button id="btn-clear-log" class="btn-link">limpar</button>
+                </div>
+                <pre id="serial-log" class="serial-log">—</pre>
+            </div>
+
+        </section>
+    </main>
+
+    <script src="/chart.js/chart.umd.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

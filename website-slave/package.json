@@ -1,0 +1,21 @@
+{
+  "name": "esp-now-slave-controller",
+  "version": "1.0.0",
+  "description": "Serial controller for one ESP-NOW slave node",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:slave1": "SLAVE_ID=1 SLAVE_PORT=/dev/ttyACM1 node server.js",
+    "start:slave2": "SLAVE_ID=2 SLAVE_PORT=/dev/ttyACM1 PORT=3002 node server.js"
+  },
+  "dependencies": {
+    "@serialport/parser-readline": "^12.0.0",
+    "chart.js": "^4.5.1",
+    "express": "^4.18.0",
+    "serialport": "^12.0.0",
+    "socket.io": "^4.7.0"
+  },
+  "allowScripts": {
+    "@serialport/bindings-cpp@12.0.1": true
+  }
+}
