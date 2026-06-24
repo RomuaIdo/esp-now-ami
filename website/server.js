@@ -31,6 +31,8 @@ app.get('/api/ports', async (_req, res) => {
 const slaveData = { 1: null, 2: null };
 app.get('/api/state', (_req, res) => res.json(slaveData));
 
+let serialStatus = { connected: false, port: null };
+
 // ---- Serial port ----
 
 const ESP32_VIDS = ['303A','10C4', '1A86', '0403', '0483'];  // CP210x, CH340, FTDI, STM32
@@ -54,7 +56,8 @@ async function openSerial(portPath) {
     sp.on('error', err => console.error('[Serial] Error:', err.message));
     sp.on('close', () => {
         console.warn('[Serial] Port closed – retrying in 5s…');
-        io.emit('serial-status', { connected: false });
+        serialStatus = { connected: false, port: null };
+        io.emit('serial-status', serialStatus);
         setTimeout(() => startSerial(), 5000);
     });
 
@@ -79,7 +82,8 @@ async function openSerial(portPath) {
         io.emit('waveform-data', packet);
     });
 
-    io.emit('serial-status', { connected: true, port: portPath });
+    serialStatus = { connected: true, port: portPath };
+    io.emit('serial-status', serialStatus);
 }
 
 async function startSerial() {
@@ -103,6 +107,7 @@ io.on('connection', socket => {
     console.log(`[WS] Client connected: ${socket.id}`);
 
     // Send current state to newly connected client
+    socket.emit('serial-status', serialStatus);
     if (slaveData[1]) socket.emit('waveform-data', slaveData[1]);
     if (slaveData[2]) socket.emit('waveform-data', slaveData[2]);
 });
