@@ -158,6 +158,14 @@ main {
 #card-1 .mono.message.encrypted { color: #5a8fa8; }
 #card-2 .mono.message.encrypted { color: #4a8a6a; }
 
+.hex-byte {
+    color: #f0883e;
+    background: rgba(240, 136, 62, 0.14);
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 700;
+}
+
 /* cipher before/after layout */
 .cipher-row {
     display: flex;

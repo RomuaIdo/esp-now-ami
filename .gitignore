@@ -7,6 +7,8 @@ compile_commands.json
 node_modules/
 npm-debug.log*
 .env
+website/node_modules/
+website-slave/node_modules/
 
 # OS
 .DS_Store

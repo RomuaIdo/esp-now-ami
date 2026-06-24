@@ -230,6 +230,14 @@ kbd {
 .mono.dim       { color: var(--muted); }
 .mono.encrypted { color: var(--muted); }
 
+.hex-byte {
+    color: #f0883e;
+    background: rgba(240, 136, 62, 0.14);
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: 700;
+}
+
 /* ---- Serial log ---- */
 .log-section { background: var(--bg); }
 

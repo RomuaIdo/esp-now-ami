@@ -32,12 +32,17 @@ function bytesToString(bytes) {
         .join('');
 }
 
-// Encrypted bytes: printable chars shown as-is, others as [NN] (2-digit hex in brackets)
+function escapeHtml(ch) {
+    return ch.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Encrypted bytes as HTML: printable chars shown as-is, non-printable as
+// colored \xNN spans so hex escapes are never confused with literal chars.
 function encryptedToString(bytes) {
     return bytes
         .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
-            ? String.fromCharCode(b)
-            : `[${b.toString(16).padStart(2, '0').toUpperCase()}]`)
+            ? escapeHtml(String.fromCharCode(b))
+            : `<span class="hex-byte">\\x${b.toString(16).padStart(2, '0')}</span>`)
         .join('');
 }
 
@@ -138,7 +143,7 @@ function updatePanel(chart, slaveId, packet) {
 
     document.getElementById(`bits-${slaveId}`).textContent = bitString(bits);
     document.getElementById(`hex-${slaveId}`).textContent  = toHex(encBytes);
-    document.getElementById(`enc-${slaveId}`).textContent  = encryptedToString(encBytes);
+    document.getElementById(`enc-${slaveId}`).innerHTML    = encryptedToString(encBytes);
     document.getElementById(`msg-${slaveId}`).textContent  = message;
     document.getElementById(`ts-${slaveId}`).textContent   =
         `Último pacote: ${new Date().toLocaleTimeString()}`;

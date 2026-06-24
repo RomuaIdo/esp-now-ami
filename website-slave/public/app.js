@@ -67,11 +67,17 @@ function bitString(bytes) {
     return groups.join(' ');
 }
 
+function escapeHtml(ch) {
+    return ch.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Encrypted bytes as HTML: printable chars shown as-is, non-printable as
+// colored \xNN spans so hex escapes are never confused with literal chars.
 function encryptedToString(bytes) {
     return bytes
         .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
-            ? String.fromCharCode(b)
-            : `[${b.toString(16).padStart(2, '0').toUpperCase()}]`)
+            ? escapeHtml(String.fromCharCode(b))
+            : `<span class="hex-byte">\\x${b.toString(16).padStart(2, '0')}</span>`)
         .join('');
 }
 
@@ -150,7 +156,7 @@ function updateWaveform(msg) {
 
     elBitsOut.textContent = bitString(encBytes);
     elHexOut.textContent  = toHex(encBytes);
-    elEncOut.textContent  = encryptedToString(encBytes);
+    elEncOut.innerHTML    = encryptedToString(encBytes);
 }
 
 // ---- Slave ID theming ----
