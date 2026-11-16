@@ -1,19 +1,12 @@
 'use strict';
 
-// Must match the XOR_KEY in slave/main.cpp
+// Must match the XOR_KEY in src/slave/main.cpp
 const XOR_KEY = 'BrasilHexa';
 
-// ---- XOR decrypt ----
-function xorDecrypt(bytes) {
-    const key = XOR_KEY;
-    return bytes.map((b, i) => b ^ key.charCodeAt(i % key.length));
-}
+// ---- Decoding ----
 
-// ---- AMI decode ----
-// Rule: non-zero level (±V) → bit 0 ; zero level → bit 1
-function amiDecode(waveform) {
-    return waveform.map(v => v !== 0 ? 0 : 1);
-}
+// Pseudo-ternary: non-zero level (±V) → bit 0 ; zero level → bit 1
+const amiDecode = waveform => waveform.map(v => v !== 0 ? 0 : 1);
 
 // Pack bit array (MSB-first) into byte array
 function bitsToBytes(bits) {
@@ -26,160 +19,115 @@ function bitsToBytes(bits) {
     return bytes;
 }
 
-function bytesToString(bytes) {
-    return bytes
-        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0 ? String.fromCharCode(b) : '?')
-        .join('');
-}
+const xorBytes = bytes => bytes.map((b, i) => b ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
 
-function escapeHtml(ch) {
-    return ch.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// Encrypted bytes as HTML: printable chars shown as-is, non-printable as
-// colored \xNN spans so hex escapes are never confused with literal chars.
-function encryptedToString(bytes) {
-    return bytes
-        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
-            ? escapeHtml(String.fromCharCode(b))
-            : `<span class="hex-byte">\\x${b.toString(16).padStart(2, '0')}</span>`)
-        .join('');
-}
-
-function toHex(bytes) {
-    return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-}
+const bytesToString = bytes =>
+    bytes.map(b => AMI.isPrintable(b) ? String.fromCharCode(b) : '?').join('');
 
 function bitString(bits) {
     const groups = [];
-    for (let i = 0; i < bits.length; i += 8) {
-        groups.push(bits.slice(i, i + 8).join(''));
-    }
+    for (let i = 0; i < bits.length; i += 8) groups.push(bits.slice(i, i + 8).join(''));
     return groups.join(' ');
 }
 
-// ---- Chart.js setup ----
-const CHART_COLORS = {
-    1: { line: '#00bfff', fill: 'rgba(0,191,255,0.08)' },
-    2: { line: '#00e676', fill: 'rgba(0,230,118,0.08)' },
-};
+const levelName = v => v === 0 ? '0 V' : v > 0 ? '+V' : '−V';
 
-function makeChart(canvasId, slaveId) {
-    const ctx = document.getElementById(canvasId).getContext('2d');
-    return new Chart(ctx, {
-        type: 'line',
-        data: {
-            datasets: [{
-                label: `Slave ${slaveId} – AMI`,
-                data: [],
-                stepped: true,
-                borderColor: CHART_COLORS[slaveId].line,
-                backgroundColor: CHART_COLORS[slaveId].fill,
-                borderWidth: 2,
-                pointRadius: 0,
-                tension: 0,
-            }]
+function timeStamp() {
+    const d = new Date();
+    return d.toLocaleTimeString('pt-BR', { hour12: false }) +
+        '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+// ---- Channels ----
+
+const tpl = document.getElementById('channel-tpl');
+const channelsEl = document.getElementById('channels');
+const channels = {};
+
+for (const id of [1, 2]) {
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    node.id = `ch-${id}`;
+    node.dataset.ch = id;
+    node.querySelector('.ch-tag').textContent = `CH${id}`;
+    node.querySelector('.ch-name').textContent = `Slave ${id}`;
+    channelsEl.append(node);
+
+    const f = name => node.querySelector(`[data-f="${name}"]`);
+    const canvas = node.querySelector('canvas');
+    canvas.setAttribute('aria-label', `Forma de onda AMI do slave ${id}: sem sinal`);
+
+    const ch = { id, node, f, canvas, count: 0, tbody: node.querySelector('tbody') };
+    ch.scope = new AmiScope(canvas, {
+        emptyText: `Aguardando pacote do slave ${id}`,
+        onCursor: info => {
+            f('cursor').textContent = info
+                ? `Bit ${info.bit} (byte ${info.byte}, bit ${7 - info.bitInByte} MSB)  nível ${levelName(info.level)}  valor ${info.value}` +
+                  (info.enc !== undefined ? `  byte cifrado 0x${AMI.hex2(info.enc)}  texto '${AMI.charLabel(info.plain)}'` : '') +
+                  (info.violation ? '  violação de polaridade' : '')
+                : 'Passe o cursor sobre a forma de onda para medir um bit.';
         },
-        options: {
-            animation: false,
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Bit', color: '#aaa' },
-                    min: 0,
-                    grid: { color: 'rgba(255,255,255,0.07)' },
-                    ticks: {
-                        color: '#888',
-                        maxTicksLimit: 20,
-                        callback: v => Number.isInteger(v) ? v : '',
-                    }
-                },
-                y: {
-                    min: -1.6,
-                    max: 1.6,
-                    ticks: {
-                        color: '#aaa',
-                        stepSize: 1,
-                        callback: v => ({ '-1': '−V', 0: '0', 1: '+V' }[v] ?? ''),
-                    },
-                    grid: { color: 'rgba(255,255,255,0.1)' },
-                }
-            },
-            plugins: {
-                legend: {
-                    labels: { color: '#ccc' }
-                },
-                tooltip: {
-                    callbacks: {
-                        label: ctx => {
-                            const v = ctx.parsed.y;
-                            const lvl = v === 0 ? '0 V' : v > 0 ? '+V' : '−V';
-                            return `Bit ${ctx.parsed.x}: ${lvl}`;
-                        }
-                    }
-                }
-            }
-        }
     });
+    AMI.renderByteTable(ch.tbody, { plain: [], enc: [], key: XOR_KEY });
+    channels[id] = ch;
 }
 
-// ---- Update a slave panel ----
-function updatePanel(chart, slaveId, packet) {
-    const { waveform, num_bits } = packet;
-    const bits      = amiDecode(waveform);
-    const encBytes  = bitsToBytes(bits);
-    const decBytes  = xorDecrypt(encBytes);
-    const message   = bytesToString(decBytes);
+document.getElementById('key-label').textContent = XOR_KEY;
 
-    // Waveform data as {x, y} points; add sentinel to show last bit's full width
-    const xyData = waveform.map((v, i) => ({ x: i, y: v }));
-    if (xyData.length > 0) xyData.push({ x: num_bits, y: waveform[num_bits - 1] });
+function updateChannel(ch, packet) {
+    const waveform = packet.waveform.slice(0, packet.num_bits ?? packet.waveform.length);
+    const bits  = amiDecode(waveform);
+    const enc   = bitsToBytes(bits);
+    const plain = xorBytes(enc);
+    const msg   = bytesToString(plain);
+    const st    = AMI.stats(waveform);
+    const { f } = ch;
 
-    chart.data.datasets[0].data = xyData;
-    chart.options.scales.x.max = num_bits;
-    chart.update();
+    ch.count++;
+    ch.scope.setData(waveform, enc, plain);
 
-    document.getElementById(`bits-${slaveId}`).textContent = bitString(bits);
-    document.getElementById(`hex-${slaveId}`).textContent  = toHex(encBytes);
-    document.getElementById(`enc-${slaveId}`).innerHTML    = encryptedToString(encBytes);
-    document.getElementById(`msg-${slaveId}`).textContent  = message;
-    document.getElementById(`ts-${slaveId}`).textContent   =
-        `Último pacote: ${new Date().toLocaleTimeString()}`;
+    f('count').textContent  = ch.count;
+    f('ts').textContent     = timeStamp();
+    f('bits').textContent   = st.bits;
+    f('bytes').textContent  = st.bytes;
+    f('pos').textContent    = st.pos;
+    f('neg').textContent    = st.neg;
+    f('zero').textContent   = st.zero;
+    f('dc').textContent     = st.dc > 0 ? `+${st.dc}` : st.dc;
+    f('viol').textContent   = st.violations.size;
+    f('viol').classList.toggle('fault', st.violations.size > 0);
+
+    f('bitstr').textContent = bitString(bits);
+    f('hex').textContent    = AMI.toHex(enc);
+    f('enc').innerHTML      = AMI.bytesToHtml(enc);
+    f('msg').textContent    = msg;
+
+    ch.canvas.setAttribute('aria-label',
+        `Forma de onda AMI do slave ${ch.id}: ${st.bits} bits, mensagem decifrada "${msg}"`);
+    AMI.renderByteTable(ch.tbody, { plain, enc, key: XOR_KEY });
+
+    // Brief flash on the channel tag to mark a new packet
+    ch.node.classList.remove('rx');
+    void ch.node.offsetWidth;
+    ch.node.classList.add('rx');
 }
 
-// ---- Main ----
-const charts = {
-    1: makeChart('chart-1', 1),
-    2: makeChart('chart-2', 2),
-};
+// ---- Link status ----
+
+function setLink(id, on, text) {
+    const el = document.getElementById(id);
+    el.dataset.state = on ? 'on' : 'off';
+    el.querySelector('output').textContent = text;
+}
 
 const socket = io();
 
-socket.on('connect', () => {
-    document.getElementById('ws-status').classList.replace('badge-off', 'badge-on');
-    document.getElementById('ws-status').textContent = 'WebSocket ✓';
-});
+socket.on('connect',    () => setLink('ws-status', true,  'conectado'));
+socket.on('disconnect', () => setLink('ws-status', false, 'desconectado'));
 
-socket.on('disconnect', () => {
-    document.getElementById('ws-status').classList.replace('badge-on', 'badge-off');
-    document.getElementById('ws-status').textContent = 'WebSocket';
-});
-
-socket.on('serial-status', ({ connected, port }) => {
-    const el = document.getElementById('serial-status');
-    if (connected) {
-        el.classList.replace('badge-off', 'badge-on');
-        el.textContent = `Serial ✓ ${port}`;
-    } else {
-        el.classList.replace('badge-on', 'badge-off');
-        el.textContent = 'Serial (desconectado)';
-    }
-});
+socket.on('serial-status', ({ connected, port }) =>
+    setLink('serial-status', connected, connected ? port : 'desconectado'));
 
 socket.on('waveform-data', packet => {
-    const id = packet.slave;
-    if (id !== 1 && id !== 2) return;
-    updatePanel(charts[id], id, packet);
+    const ch = channels[packet.slave];
+    if (ch && Array.isArray(packet.waveform)) updateChannel(ch, packet);
 });

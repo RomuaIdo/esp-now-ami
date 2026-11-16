@@ -1,255 +1,189 @@
 'use strict';
 
-const XOR_KEY = 'ESP32Key2024';  // must match slave firmware
+// Must match the XOR_KEY in src/slave/main.cpp
+const XOR_KEY = 'BrasilHexa';
+const MAX_LEN = 20;
+const MAX_LOG_LINES = 200;
 
-const COLORS = {
-    1: { line: '#00bfff', fill: 'rgba(0,191,255,0.08)' },
-    2: { line: '#00e676', fill: 'rgba(0,230,118,0.08)' },
-};
-const MAX_LOG_LINES = 60;
-const logLines = [];
+const $ = id => document.getElementById(id);
 
-let slaveId = 1;
-
-// ---- DOM refs ----
-const elLabel        = document.getElementById('slave-label');
-const elWsStatus     = document.getElementById('ws-status');
-const elSerialStatus = document.getElementById('serial-status');
-const elInput        = document.getElementById('msg-input');
-const elCharCount    = document.getElementById('char-count');
-const elBtnSet       = document.getElementById('btn-set');
-const elBtnSend      = document.getElementById('btn-send');
-const elBitsOut      = document.getElementById('bits-out');
-const elHexOut       = document.getElementById('hex-out');
-const elEncOut       = document.getElementById('enc-out');
-const elLog          = document.getElementById('serial-log');
-const elBtnClearLog  = document.getElementById('btn-clear-log');
-const elWaveformHint = document.getElementById('waveform-hint');
+const elInput   = $('msg-input');
+const elPayload = $('payload');
+const elCount   = $('payload-count');
+const elLog     = $('serial-log');
+const elCursor  = $('cursor');
+const canvas    = $('waveform');
 
 // ---- Encoding (mirrors slave firmware) ----
 
-function xorEncrypt(str) {
-    const bytes = [];
-    for (let i = 0; i < str.length; i++) {
-        // & 0xFF clamps Latin-1 chars (≤ 0xFF) correctly; out-of-range become '?'
-        const b = str.charCodeAt(i) <= 0xFF ? str.charCodeAt(i) : 0x3F;
-        bytes.push(b ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
-    }
-    return bytes;
-}
+// Latin-1 bytes; chars above U+00FF become '?' (same as server.js)
+const toLatin1 = str => [...str].map(c => c.charCodeAt(0) <= 0xFF ? c.charCodeAt(0) : 0x3F);
 
-// 0-bit → alternates ±1 ; 1-bit → 0  (matches firmware amiEncode)
+const xorBytes = bytes => bytes.map((b, i) => b ^ XOR_KEY.charCodeAt(i % XOR_KEY.length));
+
+// bit 0 → alternating ±1 ; bit 1 → 0  (matches firmware amiEncode)
 function amiEncode(bytes) {
     const waveform = [];
     let polarity = 1;
     for (const byte of bytes) {
         for (let bit = 7; bit >= 0; bit--) {
-            if (!((byte >> bit) & 1)) {
-                waveform.push(polarity);
-                polarity = -polarity;
-            } else {
-                waveform.push(0);
-            }
+            if ((byte >> bit) & 1) waveform.push(0);
+            else { waveform.push(polarity); polarity = -polarity; }
         }
     }
     return waveform;
 }
 
-function toHex(bytes) {
-    return bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+const levelName = v => v === 0 ? '0 V' : v > 0 ? '+V' : '−V';
+
+function timeStamp() {
+    const d = new Date();
+    return d.toLocaleTimeString('pt-BR', { hour12: false }) +
+        '.' + String(d.getMilliseconds()).padStart(3, '0');
 }
 
-function bitString(bytes) {
-    const groups = [];
-    for (const b of bytes) {
-        groups.push(b.toString(2).padStart(8, '0'));
-    }
-    return groups.join(' ');
-}
+// ---- Scope ----
 
-function escapeHtml(ch) {
-    return ch.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// Encrypted bytes as HTML: printable chars shown as-is, non-printable as
-// colored \xNN spans so hex escapes are never confused with literal chars.
-function encryptedToString(bytes) {
-    return bytes
-        .map(b => (b >= 0x20 && b <= 0x7E) || b >= 0xA0
-            ? escapeHtml(String.fromCharCode(b))
-            : `<span class="hex-byte">\\x${b.toString(16).padStart(2, '0')}</span>`)
-        .join('');
-}
-
-// ---- Chart ----
-
-const chart = new Chart(
-    document.getElementById('waveform-chart').getContext('2d'),
-    {
-        type: 'line',
-        data: { datasets: [{ data: [], stepped: true, borderWidth: 2, pointRadius: 0, tension: 0 }] },
-        options: {
-            animation: false,
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    type: 'linear',
-                    title: { display: true, text: 'Bit', color: '#aaa' },
-                    min: 0,
-                    grid: { color: 'rgba(255,255,255,0.07)' },
-                    ticks: { color: '#888', maxTicksLimit: 20, callback: v => Number.isInteger(v) ? v : '' },
-                },
-                y: {
-                    min: -1.6, max: 1.6,
-                    ticks: {
-                        color: '#aaa',
-                        stepSize: 1,
-                        callback: v => ({ '-1': '−V', 0: '0', 1: '+V' }[v] ?? ''),
-                    },
-                    grid: { color: 'rgba(255,255,255,0.1)' },
-                },
-            },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: ctx => {
-                            const v = ctx.parsed.y;
-                            return `Bit ${ctx.parsed.x}: ${v === 0 ? '0 V' : v > 0 ? '+V' : '−V'}`;
-                        }
-                    }
-                }
-            }
-        }
-    }
-);
-
-function applySlaveColors(id) {
-    const c = COLORS[id] || COLORS[1];
-    chart.data.datasets[0].borderColor     = c.line;
-    chart.data.datasets[0].backgroundColor = c.fill;
-    chart.data.datasets[0].label = `Slave ${id} – AMI`;
-    chart.update();
-}
+const scope = new AmiScope(canvas, {
+    emptyText: 'Digite uma mensagem para ver a forma de onda',
+    onCursor: info => {
+        elCursor.textContent = info
+            ? `Bit ${info.bit} (byte ${info.byte}, bit ${7 - info.bitInByte} MSB)  nível ${levelName(info.level)}  valor ${info.value}` +
+              `  byte cifrado 0x${AMI.hex2(info.enc)}  texto '${AMI.charLabel(info.plain)}'`
+            : 'Passe o cursor sobre a forma de onda para medir um bit.';
+    },
+});
 
 function updateWaveform(msg) {
-    if (!msg) {
-        chart.data.datasets[0].data = [];
-        chart.update();
-        elBitsOut.textContent = '—';
-        elHexOut.textContent  = '—';
-        elEncOut.textContent  = '—';
-        return;
-    }
+    const plain    = toLatin1(msg.slice(0, MAX_LEN));
+    const enc      = xorBytes(plain);
+    const waveform = amiEncode(enc);
+    const st       = AMI.stats(waveform);
+    const empty    = !plain.length;
 
-    const encBytes = xorEncrypt(msg);
-    const waveform = amiEncode(encBytes);
-    const numBits  = waveform.length;
+    scope.setData(waveform, enc, plain);
 
-    const xyData = waveform.map((v, i) => ({ x: i, y: v }));
-    if (xyData.length > 0) xyData.push({ x: numBits, y: waveform[numBits - 1] });
+    $('m-bits').textContent  = empty ? '—' : st.bits;
+    $('m-bytes').textContent = empty ? '—' : st.bytes;
+    $('m-pos').textContent   = empty ? '—' : st.pos;
+    $('m-neg').textContent   = empty ? '—' : st.neg;
+    $('m-zero').textContent  = empty ? '—' : st.zero;
+    $('m-dc').textContent    = empty ? '—' : (st.dc > 0 ? `+${st.dc}` : st.dc);
 
-    chart.data.datasets[0].data = xyData;
-    chart.options.scales.x.max  = numBits;
-    chart.update();
+    $('bits-out').textContent = empty ? '—' : enc.map(AMI.bin8).join(' ');
+    $('hex-out').textContent  = empty ? '—' : AMI.toHex(enc);
+    $('enc-out').innerHTML    = empty ? '—' : AMI.bytesToHtml(enc);
 
-    elBitsOut.textContent = bitString(encBytes);
-    elHexOut.textContent  = toHex(encBytes);
-    elEncOut.innerHTML    = encryptedToString(encBytes);
+    canvas.setAttribute('aria-label', empty
+        ? 'Forma de onda AMI: sem sinal'
+        : `Forma de onda AMI: ${st.bits} bits para a mensagem "${msg}"`);
+    AMI.renderByteTable($('byte-table'), { plain, enc, key: XOR_KEY });
+}
+
+// ---- Payload meter ----
+
+for (let i = 0; i < MAX_LEN; i++) elPayload.append(document.createElement('i'));
+
+function updatePayload() {
+    const len = toLatin1(elInput.value).length;
+    [...elPayload.children].forEach((c, i) => c.classList.toggle('on', i < len));
+    elCount.querySelector('output').textContent = `${len} / ${MAX_LEN} bytes`;
+    elCount.classList.toggle('full', len >= MAX_LEN);
 }
 
 // ---- Slave ID theming ----
 
 function setSlaveId(id) {
-    slaveId = id;
-    const color = COLORS[id]?.line || '#e6edf3';
-    elLabel.textContent    = id;
-    elLabel.style.color    = color;
-    elLabel.style.borderColor = color;
-    document.title         = `ESP-NOW · Slave ${id} Controller`;
-    elBtnSend.style.borderColor = color;
-    elBtnSend.style.color       = color;
-    elBtnSend.style.background  = `${color}1a`;
-    applySlaveColors(id);
+    document.body.dataset.ch = id;
+    $('slave-label').textContent = `Slave ${id}`;
+    $('ch-tag').textContent = `CH${id}`;
+    document.title = `AMI Transmitter · Slave ${id}`;
+    scope.draw();  // trace color comes from CSS
 }
 
-// ---- Log ----
+// ---- Serial console ----
 
-function appendLog(line) {
-    const ts = new Date().toLocaleTimeString();
-    logLines.push(`[${ts}] ${line}`);
+const logLines = [];
+
+function appendLog(line, outgoing = false) {
+    logLines.push({ ts: timeStamp(), line, outgoing });
     if (logLines.length > MAX_LOG_LINES) logLines.shift();
-    elLog.textContent = logLines.join('\n');
-    elLog.scrollTop   = elLog.scrollHeight;
+
+    const stick = elLog.scrollTop + elLog.clientHeight >= elLog.scrollHeight - 4;
+    const frag = document.createDocumentFragment();
+    for (const l of logLines) {
+        const ts = document.createElement('span');
+        ts.className = 'ts';
+        ts.textContent = `${l.ts}  `;
+        const body = document.createElement('span');
+        if (l.outgoing) body.className = 'out';
+        body.textContent = l.line + '\n';
+        frag.append(ts, body);
+    }
+    elLog.replaceChildren(frag);
+    if (stick) elLog.scrollTop = elLog.scrollHeight;
 }
 
 // ---- Actions ----
 
 function doSetMessage() {
     const msg = elInput.value.trim();
-    if (!msg) return;
+    if (!msg) { elInput.focus(); return; }
     socket.emit('set-message', msg);
-    appendLog(`→ Set message: "${msg}"`);
+    $('armed-msg').textContent = `"${msg}"`;
+    appendLog(`> ${msg}`, true);
 }
 
 function doSend() {
     const msg = elInput.value.trim();
-    if (msg) updateWaveform(msg);        // ensure chart reflects current text
-    elWaveformHint.textContent = '(última mensagem enviada)';
+    if (msg) updateWaveform(msg);
+    $('waveform-source').textContent = 'última transmissão';
+    $('last-tx').textContent = timeStamp();
     socket.emit('send');
-    appendLog('→ SEND');
+    appendLog('> SEND', true);
 }
 
 // ---- Socket ----
 
+function setLink(id, on, text) {
+    const el = $(id);
+    el.dataset.state = on ? 'on' : 'off';
+    el.querySelector('output').textContent = text;
+}
+
 const socket = io();
 
-socket.on('connect', () => {
-    elWsStatus.classList.replace('badge-off', 'badge-on');
-    elWsStatus.textContent = 'WebSocket ✓';
-});
-
-socket.on('disconnect', () => {
-    elWsStatus.classList.replace('badge-on', 'badge-off');
-    elWsStatus.textContent = 'WebSocket';
-});
-
+socket.on('connect',    () => setLink('ws-status', true,  'conectado'));
+socket.on('disconnect', () => setLink('ws-status', false, 'desconectado'));
 socket.on('slave-id', id => setSlaveId(id));
-
-socket.on('slave-status', ({ connected, port }) => {
-    if (connected) {
-        elSerialStatus.classList.replace('badge-off', 'badge-on');
-        elSerialStatus.textContent = `Serial ✓ ${port}`;
-    } else {
-        elSerialStatus.classList.replace('badge-on', 'badge-off');
-        elSerialStatus.textContent = 'Serial (desconectado)';
-    }
-});
-
+socket.on('slave-status', ({ connected, port }) =>
+    setLink('serial-status', !!connected, connected ? port : 'desconectado'));
 socket.on('slave-log', line => appendLog(line));
 
 // ---- UI events ----
 
 elInput.addEventListener('input', () => {
-    const len = elInput.value.length;
-    elCharCount.textContent = `${len} / 20`;
-    elCharCount.classList.toggle('over', len >= 20);
-    elWaveformHint.textContent = '(prévia — atualiza ao digitar)';
+    updatePayload();
+    $('waveform-source').textContent = 'prévia ao digitar';
     updateWaveform(elInput.value.trim());
 });
 
 elInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && e.ctrlKey) { doSetMessage(); doSend(); }
-    else if (e.key === 'Enter')          { doSetMessage(); }
+    if (e.key !== 'Enter') return;
+    doSetMessage();
+    if (e.ctrlKey) doSend();
 });
 
-elBtnSet.addEventListener('click', doSetMessage);
-elBtnSend.addEventListener('click', doSend);
-elBtnClearLog.addEventListener('click', () => {
-    logLines.length   = 0;
-    elLog.textContent = '—';
+$('btn-set').addEventListener('click', doSetMessage);
+$('btn-send').addEventListener('click', doSend);
+$('btn-clear-log').addEventListener('click', () => {
+    logLines.length = 0;
+    elLog.textContent = 'Console limpo.';
 });
 
-// Init
+// ---- Init ----
+
+$('key-label').textContent = XOR_KEY;
+updatePayload();
+updateWaveform('');
 setSlaveId(1);

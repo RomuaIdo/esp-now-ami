@@ -3,90 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP-NOW · AMI Waveform Display</title>
+    <meta name="color-scheme" content="dark">
+    <title>AMI Receiver · ESP-NOW</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <header>
-        <h1>ESP-NOW &mdash; Visualizador de Forma de Onda AMI</h1>
-        <div class="status-bar">
-            <span id="ws-status" class="badge badge-off">WebSocket</span>
-            <span id="serial-status" class="badge badge-off">Serial</span>
+    <header class="topbar">
+        <div class="ident">
+            <strong>ESP-NOW AMI</strong>
+            <span>Receptor master</span>
+        </div>
+        <dl class="spec">
+            <div><dt>Codificação</dt><dd>AMI pseudo-ternário</dd></div>
+            <div><dt>Cifra</dt><dd>XOR <code id="key-label"></code></dd></div>
+            <div><dt>Baud</dt><dd>115200</dd></div>
+        </dl>
+        <div class="links" aria-live="polite">
+            <span class="link" id="ws-status" data-state="off"><i class="led" aria-hidden="true"></i>WebSocket <output>desconectado</output></span>
+            <span class="link" id="serial-status" data-state="off"><i class="led" aria-hidden="true"></i>Serial <output>desconectado</output></span>
         </div>
     </header>
 
-    <main>
-        <!-- Slave 1 -->
-        <section class="slave-card" id="card-1">
-            <div class="card-header">
-                <span class="slave-label slave1">Slave 1</span>
-                <span class="timestamp" id="ts-1">Aguardando dados…</span>
+    <main class="channels" id="channels"></main>
+
+    <template id="channel-tpl">
+        <section class="channel">
+            <header class="channel-head">
+                <span class="ch-tag"></span>
+                <h2 class="ch-name"></h2>
+                <dl class="ch-meta">
+                    <div><dt>Pacotes</dt><dd data-f="count">0</dd></div>
+                    <div><dt>Último</dt><dd data-f="ts">—</dd></div>
+                </dl>
+            </header>
+
+            <div class="screen">
+                <div class="screen-scroll"><canvas role="img"></canvas></div>
+                <p class="cursor-readout" data-f="cursor">Passe o cursor sobre a forma de onda para medir um bit.</p>
             </div>
 
-            <div class="chart-wrapper">
-                <canvas id="chart-1"></canvas>
-            </div>
+            <dl class="measure">
+                <div><dt>Bits</dt><dd data-f="bits">—</dd></div>
+                <div><dt>Bytes</dt><dd data-f="bytes">—</dd></div>
+                <div><dt>Marcas +V</dt><dd data-f="pos">—</dd></div>
+                <div><dt>Marcas −V</dt><dd data-f="neg">—</dd></div>
+                <div><dt>Espaços 0 V</dt><dd data-f="zero">—</dd></div>
+                <div><dt>Nível DC</dt><dd data-f="dc">—</dd></div>
+                <div><dt>Violações</dt><dd data-f="viol">—</dd></div>
+            </dl>
 
-            <div class="info-grid">
-                <div class="info-block">
-                    <label>Bits AMI recebidos</label>
-                    <pre id="bits-1" class="mono dim">—</pre>
-                </div>
-                <div class="info-block">
-                    <label>Bytes cifrados (hex)</label>
-                    <pre id="hex-1" class="mono">—</pre>
-                </div>
-                <div class="info-block wide cipher-row">
-                    <div class="cipher-col">
-                        <label>Mensagem cifrada</label>
-                        <pre id="enc-1" class="mono message encrypted">—</pre>
+            <div class="decode">
+                <div class="pipeline">
+                    <div class="stage">
+                        <h3>Bits recebidos</h3>
+                        <pre class="mono dim" data-f="bitstr">—</pre>
                     </div>
-                    <div class="cipher-arrow">→</div>
-                    <div class="cipher-col">
-                        <label>Mensagem decifrada</label>
-                        <pre id="msg-1" class="mono message">—</pre>
+                    <div class="stage">
+                        <h3>Cifrado (hex)</h3>
+                        <pre class="mono" data-f="hex">—</pre>
                     </div>
+                    <div class="stage">
+                        <h3>Cifrado (texto)</h3>
+                        <pre class="mono" data-f="enc">—</pre>
+                    </div>
+                    <div class="stage result">
+                        <h3>Mensagem decifrada</h3>
+                        <pre class="mono" data-f="msg">—</pre>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="bytes">
+                        <caption>Byte a byte: texto ⊕ chave = cifrado</caption>
+                        <thead>
+                            <tr><th>#</th><th>Txt</th><th>Hex</th><th>Chave</th><th>Cifra</th><th>Binário (MSB)</th></tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
                 </div>
             </div>
         </section>
+    </template>
 
-        <!-- Slave 2 -->
-        <section class="slave-card" id="card-2">
-            <div class="card-header">
-                <span class="slave-label slave2">Slave 2</span>
-                <span class="timestamp" id="ts-2">Aguardando dados…</span>
-            </div>
-
-            <div class="chart-wrapper">
-                <canvas id="chart-2"></canvas>
-            </div>
-
-            <div class="info-grid">
-                <div class="info-block">
-                    <label>Bits AMI recebidos</label>
-                    <pre id="bits-2" class="mono dim">—</pre>
-                </div>
-                <div class="info-block">
-                    <label>Bytes cifrados (hex)</label>
-                    <pre id="hex-2" class="mono">—</pre>
-                </div>
-                <div class="info-block wide cipher-row">
-                    <div class="cipher-col">
-                        <label>Mensagem cifrada</label>
-                        <pre id="enc-2" class="mono message encrypted">—</pre>
-                    </div>
-                    <div class="cipher-arrow">→</div>
-                    <div class="cipher-col">
-                        <label>Mensagem decifrada</label>
-                        <pre id="msg-2" class="mono message">—</pre>
-                    </div>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <script src="/chart.js/chart.umd.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="scope.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

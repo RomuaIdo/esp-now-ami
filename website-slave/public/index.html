@@ -3,83 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP-NOW · Slave Controller</title>
+    <meta name="color-scheme" content="dark">
+    <title>AMI Transmitter · ESP-NOW</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body>
-    <header>
-        <h1>ESP-NOW &mdash; Controlador Slave <span id="slave-label" class="slave-badge">?</span></h1>
-        <div class="status-bar">
-            <span id="ws-status"     class="badge badge-off">WebSocket</span>
-            <span id="serial-status" class="badge badge-off">Serial</span>
+<body data-ch="1">
+    <header class="topbar">
+        <div class="ident">
+            <strong>ESP-NOW AMI</strong>
+            <span>Transmissor</span>
+            <span id="slave-label" class="slave-badge">CH?</span>
+        </div>
+        <dl class="spec">
+            <div><dt>Codificação</dt><dd>AMI pseudo-ternário</dd></div>
+            <div><dt>Cifra</dt><dd>XOR <code id="key-label"></code></dd></div>
+            <div><dt>Payload</dt><dd>máx. 20 bytes</dd></div>
+        </dl>
+        <div class="links" aria-live="polite">
+            <span class="link" id="ws-status" data-state="off"><i class="led" aria-hidden="true"></i>WebSocket <output>desconectado</output></span>
+            <span class="link" id="serial-status" data-state="off"><i class="led" aria-hidden="true"></i>Serial <output>desconectado</output></span>
         </div>
     </header>
 
-    <main>
-        <section class="control-card">
+    <main class="bench">
+        <div class="controls">
+            <section class="panel">
+                <header class="panel-head"><h2>Mensagem</h2></header>
+                <div class="panel-body">
+                    <label class="field-label" for="msg-input">Texto a transmitir (Latin-1)</label>
+                    <input type="text" id="msg-input" class="msg-input" maxlength="20"
+                           placeholder="Olá, master" autocomplete="off" spellcheck="false">
+                    <div class="payload" id="payload" aria-hidden="true"></div>
+                    <div class="payload-count" id="payload-count">
+                        <span>Payload</span><output>0 / 20 bytes</output>
+                    </div>
 
-            <!-- Input e botões -->
-            <div class="card-section">
-                <label class="field-label">Mensagem a enviar <span class="hint">(máx. 20 caracteres)</span></label>
-                <div class="input-row">
-                    <input
-                        type="text"
-                        id="msg-input"
-                        class="msg-input"
-                        maxlength="20"
-                        placeholder="Digite a mensagem…"
-                        autocomplete="off"
-                    >
-                    <span id="char-count" class="char-count">0 / 20</span>
+                    <div class="btn-row">
+                        <button id="btn-set"  class="btn">Definir mensagem</button>
+                        <button id="btn-send" class="btn btn-send">Transmitir</button>
+                    </div>
+                    <p class="tip"><kbd>Enter</kbd> define a mensagem. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> define e transmite.</p>
+
+                    <dl class="state-line">
+                        <div><dt>Na placa</dt><dd id="armed-msg">nenhuma</dd></div>
+                        <div><dt>Última transmissão</dt><dd id="last-tx">—</dd></div>
+                    </dl>
                 </div>
-                <div class="btn-row">
-                    <button id="btn-set"  class="btn btn-set">Definir mensagem</button>
-                    <button id="btn-send" class="btn btn-send">Enviar agora</button>
-                </div>
-                <p class="tip">
-                    <kbd>Enter</kbd> define a mensagem &nbsp;·&nbsp;
-                    <kbd>Ctrl+Enter</kbd> define e envia imediatamente.
-                </p>
+            </section>
+
+            <section class="panel">
+                <header class="panel-head">
+                    <h2>Console serial</h2>
+                    <button id="btn-clear-log" class="btn-link">Limpar</button>
+                </header>
+                <pre id="serial-log" class="serial-log" aria-live="off">Sem saída da placa ainda.</pre>
+            </section>
+        </div>
+
+        <section class="channel" id="channel">
+            <header class="channel-head">
+                <span class="ch-tag" id="ch-tag">CH1</span>
+                <h2 class="ch-name">Forma de onda</h2>
+                <dl class="ch-meta">
+                    <div><dt>Fonte</dt><dd id="waveform-source">prévia ao digitar</dd></div>
+                </dl>
+            </header>
+
+            <div class="screen">
+                <div class="screen-scroll"><canvas id="waveform" role="img" aria-label="Forma de onda AMI: sem sinal"></canvas></div>
+                <p class="cursor-readout" id="cursor">Passe o cursor sobre a forma de onda para medir um bit.</p>
             </div>
 
-            <!-- Gráfico AMI -->
-            <div class="card-section chart-section">
-                <label class="field-label">Forma de onda AMI <span class="hint" id="waveform-hint">(prévia — atualiza ao digitar)</span></label>
-                <div class="chart-wrapper">
-                    <canvas id="waveform-chart"></canvas>
+            <dl class="measure">
+                <div><dt>Bits</dt><dd id="m-bits">—</dd></div>
+                <div><dt>Bytes</dt><dd id="m-bytes">—</dd></div>
+                <div><dt>Marcas +V</dt><dd id="m-pos">—</dd></div>
+                <div><dt>Marcas −V</dt><dd id="m-neg">—</dd></div>
+                <div><dt>Espaços 0 V</dt><dd id="m-zero">—</dd></div>
+                <div><dt>Nível DC</dt><dd id="m-dc">—</dd></div>
+            </dl>
+
+            <div class="decode">
+                <div class="pipeline">
+                    <div class="stage">
+                        <h3>Bits (MSB primeiro)</h3>
+                        <pre id="bits-out" class="mono dim">—</pre>
+                    </div>
+                    <div class="stage">
+                        <h3>Cifrado (hex)</h3>
+                        <pre id="hex-out" class="mono">—</pre>
+                    </div>
+                    <div class="stage">
+                        <h3>Cifrado (texto)</h3>
+                        <pre id="enc-out" class="mono">—</pre>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="bytes">
+                        <caption>Byte a byte: texto ⊕ chave = cifrado</caption>
+                        <thead>
+                            <tr><th>#</th><th>Txt</th><th>Hex</th><th>Chave</th><th>Cifra</th><th>Binário (MSB)</th></tr>
+                        </thead>
+                        <tbody id="byte-table"></tbody>
+                    </table>
                 </div>
             </div>
-
-            <!-- Info: bits / hex / cifrado -->
-            <div class="info-grid">
-                <div class="info-block">
-                    <label>Bits (MSB primeiro)</label>
-                    <pre id="bits-out" class="mono dim">—</pre>
-                </div>
-                <div class="info-block">
-                    <label>Bytes cifrados (hex)</label>
-                    <pre id="hex-out" class="mono">—</pre>
-                </div>
-                <div class="info-block wide">
-                    <label>Mensagem cifrada (XOR)</label>
-                    <pre id="enc-out" class="mono encrypted">—</pre>
-                </div>
-            </div>
-
-            <!-- Log serial -->
-            <div class="card-section log-section">
-                <div class="log-header">
-                    <label class="field-label">Saída Serial</label>
-                    <button id="btn-clear-log" class="btn-link">limpar</button>
-                </div>
-                <pre id="serial-log" class="serial-log">—</pre>
-            </div>
-
         </section>
     </main>
 
-    <script src="/chart.js/chart.umd.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="scope.js"></script>
     <script src="app.js"></script>
 </body>
 </html>
